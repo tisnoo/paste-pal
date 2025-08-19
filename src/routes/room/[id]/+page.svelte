@@ -1,33 +1,29 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { connectToRoom, type ServerMsg } from '$lib/ws';
+  import { onDestroy } from 'svelte';
+  import { createClipboardStore } from '$lib/clipboard';
 
-  let text = '';
-  let conn: ReturnType<typeof connectToRoom> | null = null;
+  let roomId = '';
+  let clipboard = '';
 
-  onMount(() => {
-    const roomId = $page.params.id as string;
+  roomId = $page.params.id!;
 
-    conn = connectToRoom(roomId, (data: ServerMsg) => {
-      if (data.type === 'clipboard') text = data.text;
-    });
+  const clipboardStore = createClipboardStore(roomId);
 
-    return () => {
-      conn?.close();
-    };
+  const unsubscribe = clipboardStore.subscribe((value) => {
+    clipboard = value;
   });
 
-  function onInput() {
-    conn?.sendClipboard(text);
-  }
+  onDestroy(() => {
+    clipboardStore.unsubscribe();
+    unsubscribe();
+  });
+
+  const handleInput = (e: Event) => {
+    const target = e.target as HTMLTextAreaElement;
+    clipboardStore.updateClipboard(target.value);
+  };
 </script>
 
-<div class="flex flex-col items-center gap-4 p-10">
-  <h2 class="text-xl">Room: {$page.params.id}</h2>
-  <textarea
-    bind:value={text}
-    on:input={onInput}
-    class="w-[32rem] h-64 border p-2 rounded"
-  />
-</div>
+<h1>Room: {roomId}</h1>
+<textarea bind:value={clipboard} on:input={handleInput} rows="10" cols="50"></textarea>
