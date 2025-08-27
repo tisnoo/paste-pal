@@ -1,22 +1,10 @@
-# sv
+Paste-pal is a synchronised Clipboard between devices. Ideal for sharing sharing content between device clipboards, without needing to download an external messaging service.
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+To get started, simply create a room on a device 1, and join using the room code on device 2. Happy sharing!
 
-## Creating a project
+## Getting started
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Once you've cloned this project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start development server:
 
 ```sh
 npm run dev
@@ -25,14 +13,5 @@ npm run dev
 npm run dev -- --open
 ```
 
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Note
+- Seems to work pretty wonky on Firefox, please test on Google Chromse
