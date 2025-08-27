@@ -1,17 +1,48 @@
-Paste-pal is a synchronised Clipboard between devices. Ideal for sharing sharing content between device clipboards, without needing to download an external messaging service.
+# Paste-pal
 
-To get started, simply create a room on a device 1, and join using the room code on device 2. Happy sharing!
+**Paste-pal** is a synchronized clipboard between devices — perfect for quickly sharing content across device clipboards without needing to install a separate messaging service.
 
-## Getting started
+Create a room on one device, join with the room code from another, and start sharing instantly.
 
-Once you've cloned this project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start development server:
+* **Hosting**: Vercel
+* **Database**: Supabase
+
+---
+
+## 🚀 Getting Started
+
+Clone this project and install dependencies with your preferred package manager:
+
+```sh
+npm install
+# or
+pnpm install
+# or
+yarn install
+```
+
+Start the development server:
 
 ```sh
 npm run dev
+```
 
-# or start the server and open the app in a new browser tab
+Or start the server and open the app in a new browser tab automatically:
+
+```sh
 npm run dev -- --open
 ```
 
-## Note
-- Seems to work pretty wonky on Firefox, please test on Google Chromse
+---
+
+## 📦 Deploying
+
+Every push to the `main` branch triggers a Vercel pipeline and publishes the latest version of the app.
+Visit it live at: **[https://paste-pal.vercel.app/](https://paste-pal.vercel.app/)**
+
+---
+
+## ⚠️ Notes
+
+* The app currently behaves inconsistently in **Firefox**.
+* For the best experience, please use **Google Chrome**.
