@@ -3,10 +3,8 @@
   import { onDestroy } from 'svelte';
   import { createClipboardStore } from '$lib/clipboard';
 
-  let roomId = '';
+  let roomId = $page.params.id;
   let clipboard = '';
-
-  roomId = $page.params.id!;
 
   const clipboardStore = createClipboardStore(roomId);
 
@@ -15,15 +13,23 @@
   });
 
   onDestroy(() => {
-    clipboardStore.unsubscribe();
     unsubscribe();
   });
 
-  const handleInput = (e: Event) => {
+  function handleInput(e: Event) {
     const target = e.target as HTMLTextAreaElement;
     clipboardStore.updateClipboard(target.value);
-  };
+  }
 </script>
 
-<h1>Room: {roomId}</h1>
-<textarea bind:value={clipboard} on:input={handleInput} rows="10" cols="50"></textarea>
+<h2 class="text-2xl font-bold text-gray-700 text-center mb-4">
+  Room: {roomId}
+</h2>
+
+<textarea
+  bind:value={clipboard}
+  on:input={handleInput}
+  rows="10"
+  class="w-full rounded-xl border p-4 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner resize-none"
+  placeholder="Type or paste to share clipboard..."
+></textarea>

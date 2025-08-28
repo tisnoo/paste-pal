@@ -6,6 +6,7 @@ Create a room on one device, join with the room code from another, and start sha
 
 * **Hosting**: Vercel
 * **Database**: Supabase
+* **Styling**: Tailwind CSS
 
 ---
 
