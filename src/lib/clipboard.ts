@@ -1,5 +1,7 @@
 import { writable } from 'svelte/store';
 import { supabase } from './supabase';
+import { goto } from '$app/navigation';
+import { browser } from '$app/environment';
 
 export const createClipboardStore = (roomId: string) => {
   const { subscribe, set } = writable('');
@@ -21,7 +23,14 @@ export const createClipboardStore = (roomId: string) => {
     const subscription = supabase.channel(`room:${roomId}`).on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'room_clipboard', filter: `room_id=eq.${roomId}` },
-      ({ new: row }) => {
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          leaveRoom();
+          runIfOnBrowser(() => alert('This room has been closed.'));
+          return;
+        }
+
+        const row = payload.new;
         if (row.version > latestVersion) {
           latestVersion = row.version;
           set(row.content);
@@ -39,9 +48,31 @@ export const createClipboardStore = (roomId: string) => {
     if (error) console.error('Supabase update error:', error);
   };
 
+  const leaveRoom = () => {
+    supabase.removeChannel(subscription);
+    runIfOnBrowser(() => goto('/'));
+  };
+
+  const destroyRoom = async () => {
+    await supabase
+      .from('room_clipboard')
+      .delete()
+      .eq('room_id', roomId);
+    leaveRoom();
+  };
+
+  function runIfOnBrowser(runnable: () => void): void {
+    if (!browser) {
+      return;
+    }
+
+    return runnable();
+  }
+
   return {
     subscribe,
     updateClipboard,
     unsubscribe: () => supabase.removeChannel(subscription),
+    destroyRoom,
   };
 };
