@@ -107,7 +107,7 @@
     <div class="flex justify-center">
       <img src={qrCodeUrl} alt="QR Code for room" class="rounded-xl shadow border p-2 bg-white" />
     </div>
-    <p class="text-sm text-gray-500 text-center">Scan to join this room</p>
+    <p class="text-sm text-gray-500 text-center">Share code or scan to join this room</p>
   {/if}
 
   <textarea
