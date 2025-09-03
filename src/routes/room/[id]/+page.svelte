@@ -4,10 +4,11 @@
   import { createClipboardStore } from '$lib/clipboard';
   import QRCode from 'qrcode';
 
+  let roomUrl = '';
   let roomId = $page.params.id;
   let clipboard = '';
   let qrCodeUrl = '';
-  let copyMessage = '';
+  let copied = false;
   let removeCopyMessageTimeOut: NodeJS.Timeout | undefined;
 
   const clipboardStore = createClipboardStore(roomId);
@@ -26,7 +27,7 @@
   }
 
   function updateClipBoardInternal(val: string): void {
-    copyMessage = '';
+    copied = false;
     removeCopyMessageTimeOut?.close();
     clipboardStore.updateClipboard(val);
   }
@@ -44,11 +45,11 @@
   async function copyToClipboard() {
     try {
       await navigator.clipboard.writeText(clipboard);
-      copyMessage = '✅ Text copied!';
-    } catch {
-      copyMessage = '❌ Failed to copy';
+      copied = true;
+      removeCopyMessageTimeOut = setTimeout(() => (copied = false), 2000);
+    } catch (e) {
+      console.error(e);
     } finally {
-      removeCopyMessageTimeOut = setTimeout(() => (copyMessage = ''), 2000);
     }
   }
 
@@ -67,17 +68,39 @@
 
   // Generate QR code for the room link
   onMount(() => {
-    const roomUrl = `${window.location.origin}/room/${roomId}`;
+    roomUrl = `${window.location.origin}/room/${roomId}`;
     QRCode.toDataURL(roomUrl, { width: 200, margin: 1 }).then((url) => {
       qrCodeUrl = url;
     });
   });
+
+  async function shareRoom() {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Join my clipboard room',
+          text: `Here’s the link to room ${roomId}`,
+          url: roomUrl,
+        });
+      } catch (err) {
+        console.warn('Share cancelled or failed', err);
+      }
+    } else {
+      // fallback: copy link instead
+      await navigator.clipboard.writeText(roomUrl);
+      alert('🔗 Link copied to clipboard!');
+    }
+  }
 </script>
 
 <div class="mx-auto p-6 space-y-6">
-  <h2 class="text-3xl font-bold text-gray-800 text-center">
-    Room <span class="text-indigo-600">#{roomId}</span>
-  </h2>
+  <button
+    type="button"
+    class="text-3xl font-bold text-gray-800 text-center w-full cursor-pointer hover:text-indigo-600 transition"
+    on:click={shareRoom}
+  >
+    Room <span class="text-indigo-600">#{roomId}</span> 🔗
+  </button>
 
   <!-- QR Code -->
   {#if qrCodeUrl}
@@ -92,25 +115,25 @@
     on:input={handleInput}
     rows="10"
     class="w-full rounded-xl border p-4 text-gray-800 shadow-inner resize-none transition focus:outline-none focus:ring-2 focus:ring-indigo-500 
-      {copyMessage ? 'border-green-500 ring-2 ring-green-400' : 'border-gray-300'}"
+      {copied ? 'border-green-500 ring-2 ring-green-400' : 'border-gray-300'}"
     placeholder="Type or paste to share clipboard..."
   ></textarea>
-
-  <!-- Animated Copy feedback -->
-  {#if copyMessage}
-    <p class="text-sm text-green-600 text-center animate-fade-in-out">
-      {copyMessage}
-    </p>
-  {/if}
 
   <!-- Copy/Paste buttons -->
   <div class="flex gap-4">
     <button
-      class="flex-1 px-4 py-2 rounded-xl bg-gray-100 text-gray-800 font-medium shadow hover:bg-gray-200 active:scale-95 transition"
+      class="flex-1 px-4 py-2 rounded-xl font-medium shadow active:scale-95 transition
+        {copied 
+          ? 'bg-green-500 text-white hover:bg-green-600' 
+          : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}"
       on:click={copyToClipboard}
     >
-      📋 Copy
-    </button>
+      {#if copied}
+        ✅ Copied!
+      {:else}
+        📋 Copy
+      {/if}
+    </button>  
     <button
       class="flex-1 px-4 py-2 rounded-xl bg-gray-100 text-gray-800 font-medium shadow hover:bg-gray-200 active:scale-95 transition"
       on:click={pasteFromClipboard}
