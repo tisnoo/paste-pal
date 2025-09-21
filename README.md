@@ -43,6 +43,17 @@ Visit it live at: **[https://paste-pal.vercel.app/](https://paste-pal.vercel.app
 
 ---
 
+## Reloading supabase types
+
+To reload database types:
+```sh
+npx supabase gen types typescript --project-id project-id > src/lib/types/supabase.ts
+```
+
+Replace project id with actual project id (you can retrieve the project id in the supabase project settings).
+
+---
+
 ## ⚠️ Notes
 
 * The app currently behaves inconsistently in **Firefox**.

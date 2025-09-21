@@ -21,6 +21,7 @@
 		"@sveltejs/adapter-vercel": "^5.10.2",
 		"@sveltejs/kit": "^2.22.0",
 		"@sveltejs/vite-plugin-svelte": "^6.0.0",
+		"@types/qrcode": "^1.5.5",
 		"@types/ws": "^8.18.1",
 		"autoprefixer": "^10.4.21",
 		"eslint": "^9.18.0",
@@ -40,7 +41,11 @@
 		"vite": "^7.0.4"
 	},
 	"dependencies": {
-		"@supabase/supabase-js": "^2.55.0",
+		"@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
+		"@supabase/supabase-js": "^2.57.4",
+		"idb": "^8.0.3",
+		"libsodium-wrappers": "^0.7.15",
+		"localforage": "^1.10.0",
 		"qrcode": "^1.5.4",
 		"ws": "^8.18.3"
 	}

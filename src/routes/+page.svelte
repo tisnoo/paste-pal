@@ -3,7 +3,7 @@
   let roomId = '';
 
   function createRoom() {
-    const id = crypto.randomUUID().slice(0, 6);
+    const id = crypto.randomUUID();
     goto(`/room/${id}`);
   }
 
