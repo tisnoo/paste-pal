@@ -21,10 +21,12 @@ Update Host clipboard state
 Broadcast back to clients
 
 Todo:
-- Host refreshing should keep host.
+- DONE Host refreshing should keep host.
 - Host leaving should change host.
 - If possible, not a host key but rather a server key.
-- Not each message needs to be saved.
-- Everything needs to be removed when room is destroyed.
-- Only push after second on inactivity.
+- DONE Everything needs to be removed when room is destroyed.
+- DONE Only push after second on inactivity.
+- DONE Not each message needs to be saved.
 - Tests + design
+
+- Make e2ee more visible, validating keys? Paper that people can view?

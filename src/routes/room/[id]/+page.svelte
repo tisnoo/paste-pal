@@ -19,6 +19,7 @@
   let qrCodeUrl = '';
   let copied = false;
   let removeCopyMessageTimeOut: NodeJS.Timeout | undefined;
+  let actionTimeOut: NodeJS.Timeout | undefined;
 
   // E2EE state
   let store: SignalStore;
@@ -33,6 +34,8 @@
   onDestroy(() => {
     messagesSub?.unsubscribe();
     roomSub?.unsubscribe();
+    actionTimeOut?.close();
+    removeCopyMessageTimeOut?.close();
   });
 
   onMount(async () => {
@@ -371,26 +374,32 @@
     updateClipboardInternal(target.value);
   }
 
-  async function updateClipboardInternal(val: string) {
-    copied = false;
-    removeCopyMessageTimeOut?.close?.();
-    clipboard = val;
+  /**
+   * Update clipboard after timeout, if updated within timeout period reset timeout.
+   */
+  function updateClipboardInternal(val: string): void {
+    clearTimeout(actionTimeOut);
+    actionTimeOut = setTimeout(async () => {
+      copied = false;
+      clearTimeout(removeCopyMessageTimeOut);
+      clipboard = val;
 
-    if (isHost) {
-      // As host, keep copy of clipboard content to persist on reload.
-      await store.put('clipboard', clipboard);
-      await broadcastClipboard(val);
-    } else {
-      const pt = u8FromStr(val);
-      const message = await sessionCipher.encrypt(pt.buffer);
-      const payload = toBase64FromStr(message.body!);
-      await supabase.from('messages').insert({
-        room_id: roomId,
-        sender: clientId,
-        recipient: room!.host_id,
-        payload
-      });
-    }
+      if (isHost) {
+        // As host, keep copy of clipboard content to persist on reload.
+        await store.put('clipboard', clipboard);
+        await broadcastClipboard(val);
+      } else {
+        const pt = u8FromStr(val);
+        const message = await sessionCipher.encrypt(pt.buffer);
+        const payload = toBase64FromStr(message.body!);
+        await supabase.from('messages').insert({
+          room_id: roomId,
+          sender: clientId,
+          recipient: room!.host_id,
+          payload
+        });
+      }
+    }, 1000); 
   }
 
   async function destroy() {
