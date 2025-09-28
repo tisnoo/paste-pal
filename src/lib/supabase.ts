@@ -3,9 +3,10 @@ import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY
 } from '$env/static/public';
+import type { Database } from './types/supabase';
 
 if (!PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY) {
   throw new Error("Supabase env vars are missing. Did you set PUBLIC_SUPABASE_URL and PUBLIC_SUPABASE_ANON_KEY?");
 }
 
-export const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
+export const supabase = createClient<Database>(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);

@@ -1,87 +1,71 @@
--- ========================
--- room_clipboard table + policies + trigger
--- ========================
-
--- table for latest clipboard per room
-create table if not exists public.room_clipboard (
-  room_id    text primary key,
-  content    text not null default '',
-  updated_at timestamptz not null default now()
+-- Rooms
+create table rooms (
+  id text primary key default gen_random_uuid(),
+  host_id text not null,
+  last_activity_at timestamptz default now()
 );
 
--- enable Row Level Security
-alter table public.room_clipboard enable row level security;
+-- Pre-key bundles (one per room)
+create table prekey_bundles (
+  room_id text references rooms(id) on delete cascade,
+  client_id uuid not null,
+  identity_key text not null,
+  signed_prekey_id int not null,
+  signed_prekey_pub text not null,
+  signed_prekey_sig text not null,
+  registration_id int not null,
+  created_at timestamptz default now(),
+  primary key (room_id, client_id)
+);
 
--- demo policies (public read/write). tighten later if you add auth.
-do $$
+-- One-time pre-keys
+create table one_time_prekeys (
+  room_id text references rooms(id) on delete cascade,
+  client_id uuid not null,
+  id int not null,
+  pub text not null,
+  primary key (room_id, client_id, id)
+);
+
+-- Messages (ciphertext only)
+create table messages (
+  room_id text references rooms(id) on delete cascade,
+  sender text not null,
+  recipient text, -- null = broadcast
+  payload text not null, -- base64-encoded ciphertext blob
+  updated_at timestamptz default now(),
+  primary key (room_id, sender, recipient)
+);
+
+-- Room activity
+create or replace function update_room_activity()
+returns trigger as $$
 begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'room_clipboard' and policyname = 'public read'
-  ) then
-    create policy "public read"
-      on public.room_clipboard for select
-      to anon
-      using (true);
-  end if;
+  update rooms
+  set last_activity_at = now()
+  where id = NEW.room_id;
+  return NEW;
+end;
+$$ language plpgsql;
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'room_clipboard' and policyname = 'public upsert'
-  ) then
-    create policy "public upsert"
-      on public.room_clipboard for insert
-      to anon
-      with check (true);
-  end if;
+create trigger bump_room_activity
+after insert or update on messages
+for each row
+execute function update_room_activity();
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'room_clipboard' and policyname = 'public update'
-  ) then
-    create policy "public update"
-      on public.room_clipboard for update
-      to anon
-      using (true)
-      with check (true);
-  end if;
-end$$;
-
--- keep updated_at fresh on UPDATEs
-create or replace function public.set_updated_at()
-returns trigger language plpgsql as $$
+-- Cleanup inactive rooms
+create or replace function cleanup_inactive_rooms()
+returns void
+language plpgsql
+as $$
 begin
-  new.updated_at = now();
-  return new;
-end $$;
+  delete from rooms
+  where last_activity_at < now() - interval '30 minutes';
+end;
+$$;
 
-drop trigger if exists trg_updated_at on public.room_clipboard;
-create trigger trg_updated_at
-before update on public.room_clipboard
-for each row execute function public.set_updated_at();
-
--- Optional (explicit): replica identity uses the PK; good for Realtime updates
--- (Postgres does this by default when a PK exists)
-alter table public.room_clipboard replica identity using index room_clipboard_pkey;
-
--- ========================
--- Supabase Realtime enablement
--- ========================
-
--- Ensure the public
-
-alter table public.room_clipboard
-  add column if not exists version int not null default 0;
-
-create or replace function public.bump_clipboard_version()
-returns trigger language plpgsql as $$
-begin
-  new.updated_at = now();
-  new.version = coalesce(old.version, 0) + 1;
-  return new;
-end $$;
-
-drop trigger if exists trg_room_clipboard_bump on public.room_clipboard;
-create trigger trg_room_clipboard_bump
-before update on public.room_clipboard
-for each row execute function public.bump_clipboard_version();
+select cron.schedule(
+  'cleanup_inactive_rooms',      -- job name
+  '*/5 * * * *',                 -- cron syntax: every 5 min
+  $$ call cleanup_inactive_rooms(); $$
+);
