@@ -16,28 +16,25 @@ export type Database = {
     Tables: {
       messages: {
         Row: {
-          created_at: string | null
-          id: number
           payload: string
-          recipient: string | null
-          room_id: string | null
+          recipient: string
+          room_id: string
           sender: string
+          updated_at: string | null
         }
         Insert: {
-          created_at?: string | null
-          id?: number
           payload: string
-          recipient?: string | null
-          room_id?: string | null
+          recipient: string
+          room_id: string
           sender: string
+          updated_at?: string | null
         }
         Update: {
-          created_at?: string | null
-          id?: number
           payload?: string
-          recipient?: string | null
-          room_id?: string | null
+          recipient?: string
+          room_id?: string
           sender?: string
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -51,6 +48,7 @@ export type Database = {
       }
       one_time_prekeys: {
         Row: {
+          client_id: string
           consumed: boolean | null
           consumed_at: string | null
           id: number
@@ -58,6 +56,7 @@ export type Database = {
           room_id: string
         }
         Insert: {
+          client_id: string
           consumed?: boolean | null
           consumed_at?: string | null
           id: number
@@ -65,6 +64,7 @@ export type Database = {
           room_id: string
         }
         Update: {
+          client_id?: string
           consumed?: boolean | null
           consumed_at?: string | null
           id?: number
@@ -83,6 +83,7 @@ export type Database = {
       }
       prekey_bundles: {
         Row: {
+          client_id: string
           created_at: string | null
           identity_key: string
           registration_id: number
@@ -92,6 +93,7 @@ export type Database = {
           signed_prekey_sig: string
         }
         Insert: {
+          client_id: string
           created_at?: string | null
           identity_key: string
           registration_id: number
@@ -101,6 +103,7 @@ export type Database = {
           signed_prekey_sig: string
         }
         Update: {
+          client_id?: string
           created_at?: string | null
           identity_key?: string
           registration_id?: number
@@ -113,32 +116,11 @@ export type Database = {
           {
             foreignKeyName: "prekey_bundles_room_id_fkey"
             columns: ["room_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "rooms"
             referencedColumns: ["id"]
           },
         ]
-      }
-      room_clipboard: {
-        Row: {
-          content: string
-          room_id: string
-          updated_at: string
-          version: number
-        }
-        Insert: {
-          content?: string
-          room_id: string
-          updated_at?: string
-          version?: number
-        }
-        Update: {
-          content?: string
-          room_id?: string
-          updated_at?: string
-          version?: number
-        }
-        Relationships: []
       }
       rooms: {
         Row: {

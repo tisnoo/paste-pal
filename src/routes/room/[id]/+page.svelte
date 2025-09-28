@@ -14,8 +14,15 @@
 	import { goto } from '$app/navigation';
 	import { destroyRoom } from '$lib/destroyRoom';
 
+  const maxRoomSize = 5;
+
   let roomId = $page.params.id!;
   let clipboard = '';
+  /**
+   * Date of latest clipboard event. Clipboard should only be updated if after latest clipboard event date.
+   */
+  let latestClipboardEventDate: Date | undefined;
+
   let qrCodeUrl = '';
   let copied = false;
   let removeCopyMessageTimeOut: NodeJS.Timeout | undefined;
@@ -23,10 +30,8 @@
 
   // E2EE state
   let store: SignalStore;
-  let isHost = false;
   let room: Database['public']['Tables']['rooms']['Row'] | null;
   let clientId: string;
-  let sessionCipher: any;
   let clientSessions = new Map<string, SessionCipher>(); // host only
   let messagesSub: RealtimeChannel | undefined;
   let roomSub: RealtimeChannel | undefined;
@@ -34,8 +39,6 @@
   onDestroy(() => {
     messagesSub?.unsubscribe();
     roomSub?.unsubscribe();
-    actionTimeOut?.close();
-    removeCopyMessageTimeOut?.close();
   });
 
   onMount(async () => {
@@ -59,59 +62,73 @@
     }
 
     room = roomData;
-    isHost = room?.host_id === clientId || !room;
 
-    if (isHost) {
-      await setupHost();
-    } else {
-      await setupClient();
+    if (!room) {
+      room = (await supabase.from('rooms').insert({ id: roomId, host_id: clientId }).select('*').single()).data!;
     }
+
+    await setupClient();
+    await connectWithRoomClients();
+
+    // Request message from all clients, we don't know which clients are on-line to send it.
+    await broadcastRaw('request clipboard');
 
     subscribeMessages();
     subscribeToRoomDeletion();
   });
 
   /**
-   * Initializes the host for a room:
-   * - Inserts the room into the database if it doesn't exist.
-   * - Ensures the host has a persistent identity key pair and registration ID.
-   * - Loads or generates a signed pre-key. If a signed pre-key already exists,
-   *   the host restores the saved clipboard content and terminates early.
+   * Initializes client for a room:
+   * - Ensures the host has a client identity key pair and registration ID.
+   * - Loads or generates a signed pre-key.
    * - Generates one-time pre-keys for client consumption.
-   * - Uploads the host's pre-key bundle to the server for clients to establish sessions.
+   * - Uploads the client's pre-key bundle to the server for clients to establish sessions.
    */
-  async function setupHost(): Promise<void> {
-    if (!room) {
-      room = (await supabase.from('rooms').insert({ id: roomId, host_id: clientId }).select('*').single()).data!;
-    }
-
+  async function setupClient(): Promise<void> {
     // Ensure persistent identity key pair and registration ID
     const {identityKeyPair, registrationId} = await ensureIdentityAndRegistration();
 
     // fixed id for deterministic storage
     const signedPreKeyId = 1;
-    let signedPreKey = await store.loadSignedPreKey(signedPreKeyId);
 
     // If pre-key already exists, restore clipboard and exit early
-    if (signedPreKey) {
-      const savedClipboard = await store.get('clipboard');
-      clipboard = savedClipboard || "";
+    if (await store.loadSignedPreKey(signedPreKeyId)) {
       return;
     }
 
+    // Retrieve current participant count by retrieving amount of bundles already existing.
+    const {count} = await supabase
+      .from('prekey_bundles')
+      .select('*', { count: 'exact', head: true })
+      .eq('room_id', roomId)
+      .neq('client_id', clientId);
+
+    if ((count ?? 0) >= maxRoomSize) {
+      goto('/');
+      alert('Max client size has been reached for this room.');
+      throw new Error('Error generating one time pre key bundles, max client size has been reached for this room.');
+    }
+
+    const bundle = await generateKeyBundle(identityKeyPair, registrationId, signedPreKeyId, maxRoomSize - count! - 1);
+
+    // Upload bundle & one time pre keys
+    await prekeys(roomId!, bundle);
+  }
+
+  /** Generates key bundle and one-time pre-keys for upload. */
+  async function generateKeyBundle(identityKeyPair: any, registrationId: number, signedPreKeyId: number, amount: number) {
     // Generate signed pre-key
     const spk = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
-    signedPreKey = spk.keyPair;
+    const signedPreKey = spk.keyPair;
     const signedPreKeySig = spk.signature;
     await store.storeSignedPreKey(signedPreKeyId, signedPreKey);
     await store.put(`signedPreKeySig_${signedPreKeyId}`, spk.signature);
 
     // Generate one-time pre-keys for clients
     const startId = Math.floor(Math.random() * 1000) + 1000;
-    const preKeys = await generatePreKeys(startId, 10);
+    const preKeys = await generatePreKeys(startId, amount);
 
-    // Upload pre-key bundle to server
-    const bundle = {
+    return {
       identityKey: toBase64(new Uint8Array(identityKeyPair.pubKey)),
       registrationId,
       signedPreKey: {
@@ -119,10 +136,9 @@
         pubKey: toBase64(new Uint8Array(signedPreKey.pubKey)),
         signature: toBase64(new Uint8Array(signedPreKeySig!))
       },
-      preKeys
+      preKeys,
+      clientId,
     };
-
-    await prekeys(roomId!, bundle);
   }
 
   /**
@@ -144,239 +160,191 @@
     return preKeys;
   }
 
-  /**
-   * Initializes the client in a room:
-   * - Loads an existing session if available.
-   * - Otherwise, fetches the host's pre-key bundle and consumes a one-time pre-key.
-   * - Establishes a new Signal session with the host.
-   * - Requests the initial clipboard content from the host.
-   */
-  async function setupClient(): Promise<void> {
-    const address = new libsignal.SignalProtocolAddress(room!.host_id, 1);
-
-    // Reuse session if already stored
-    const existingSession = await store.loadSession(address.toString());
-    if (existingSession) {
-      console.log('Reusing session from storage');
-      sessionCipher = new SessionCipher(store, address);
-      await requestInitialMessageClient();
-      return;
-    }
-
-    // Fetch host pre-key bundle
-    const { data: hostBundle, error: hostErr } = await supabase
+  /** Initialises pairwise sessions with all current room clients. Re-use sessions where possible. */
+  async function connectWithRoomClients(): Promise<void> {
+    const { data: bundles, error } = await supabase
       .from('prekey_bundles')
       .select('*')
       .eq('room_id', roomId)
-      .single();
+      .neq('client_id', clientId)
 
-    if (hostErr || !hostBundle) {
-      console.error('No host bundle');
+    if (error) {
+      goto('/');
+      alert('Error retrieving bundles');
+      throw error;
+    }
+    
+    // Client is first room client
+    if (!bundles?.length) {
       return;
     }
 
-    // Consume one unused one-time prekey
-    const { data: deletedPreKeys, error } = await supabase
-      .from('one_time_prekeys')
-      .delete()
-      .eq('room_id', roomId)
-      .order('id', { ascending: true })  // optional: pick the "first" pre-key
-      .limit(1)
-      .select('*');
-
-    if (error || !deletedPreKeys || !deletedPreKeys.length) {
-      console.error('No prekeys left', error);
-      return;
+    // Room is filled
+    if (bundles.length >= maxRoomSize) {
+      goto('/');
+      alert('Room is full.');
+      throw new Error('Room is full.');
     }
 
-    const preKey = deletedPreKeys[0];
+    for (const bundle of bundles) {
+      const address = new libsignal.SignalProtocolAddress(bundle.client_id, 1);
 
-    await ensureIdentityAndRegistration();
-
-    // Build pre-key bundle for establishing session.
-    const preKeyBundle = {
-      identityKey: fromBase64(hostBundle.identity_key).buffer,
-      registrationId: hostBundle.registration_id,
-      signedPreKey: {
-        keyId: hostBundle.signed_prekey_id,
-        publicKey: fromBase64(hostBundle.signed_prekey_pub).buffer,
-        signature: fromBase64(hostBundle.signed_prekey_sig).buffer,
-      },
-      preKey: {
-        keyId: preKey.id,
-        publicKey: fromBase64(preKey.pub).buffer,
+      // Reuse existing session if it exists
+      const existingSession = await store.loadSession(address.toString());
+      if (existingSession) {
+        console.log(`Reusing session with ${bundle.client_id}`);
+        clientSessions.set(bundle.client_id, new SessionCipher(store, address));
+        continue;
       }
-    };
 
-    // Establish new session with host
-    const sb = new SessionBuilder(store, address);
-    await sb.processPreKey(preKeyBundle);
+      // Grab unused one-time pre-key
+      const { data: preKeys, error: preKeyErr } = await supabase
+        .from('one_time_prekeys')
+        .select('*')
+        .eq('room_id', roomId)
+        .eq('client_id', bundle.client_id)
+        .order('id', { ascending: true })
+        .limit(1)
 
-    sessionCipher = new SessionCipher(store, address);
-    await requestInitialMessageClient();
+      if (preKeyErr || !preKeys || !preKeys.length) {
+        goto('/');
+        alert(`No prekeys left for peer ${bundle.client_id}`);
+        throw new Error(`No prekeys left for peer ${bundle.client_id} ${preKeyErr}`);
+      }
+
+      const preKey = preKeys[0];
+
+      // Mark pre-key as consumed
+      await supabase
+        .from('one_time_prekeys')
+        .delete()
+        .eq('room_id', roomId)
+        .eq('id', preKey.id);
+
+      // Build pre-key bundle & establish session
+      const preKeyBundle = {
+        identityKey: fromBase64(bundle.identity_key).buffer,
+        registrationId: bundle.registration_id,
+        signedPreKey: {
+          keyId: bundle.signed_prekey_id,
+          publicKey: fromBase64(bundle.signed_prekey_pub).buffer,
+          signature: fromBase64(bundle.signed_prekey_sig).buffer,
+        },
+        preKey: {
+          keyId: preKey.id,
+          publicKey: fromBase64(preKey.pub).buffer,
+        },
+      };
+
+      const sb = new SessionBuilder(store, address);
+      await sb.processPreKey(preKeyBundle);
+
+      clientSessions.set(bundle.client_id, new SessionCipher(store, address));
+    }
   }
 
-  /**
-   * Requests initial clipboard content as connecting client
-   */
-  async function requestInitialMessageClient() {
-    const msgBytes = u8FromStr('request clipboard');
-    const message = await sessionCipher.encrypt(msgBytes.buffer);
-    const payload = toBase64FromStr(message.body);
-    await supabase.from('messages').insert({
-      room_id: roomId,
-      sender: clientId,
-      recipient: room!.host_id,
-      payload
-    });
-  }
-
-  /** Subscribe to messages table, each message can concern client. */
+  /** Subscribe to messages table updates. */
   function subscribeMessages() {
+    const baseQuery = {schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}`};
+
     messagesSub = supabase
       .channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
-        handleIncomingRow(payload.new);
+      .on('postgres_changes', {...baseQuery, event: 'INSERT'}, (payload) => {
+        handleIncomingRow(payload.new as Database['public']['Tables']['messages']['Row']);
+      })
+      .on('postgres_changes', {...baseQuery, event: 'UPDATE'}, (payload) => {
+        handleIncomingRow(payload.new as Database['public']['Tables']['messages']['Row']);
       })
       .subscribe();
   }
 
-  /**
-   * Get notified if room is deleted, should kick user out.
-   */
+  /** Subscribe to room deletion → auto-kick clients. */
   function subscribeToRoomDeletion() {
     roomSub = supabase
       .channel(`room:${roomId}`)
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, payload => {
-        if (store) {
-          store.destroy();
-        }
-        
+        store?.destroy();
         goto('/');
-        alert('Room has been destroyed, returning home.');
+        alert('Room was destroyed.');
       })
       .subscribe();
   }
 
-  /**
-   * Handles an incoming message row from the Supabase `messages` table.
-   *
-   * - On the host: establishes or resumes sessions with clients, decrypts incoming
-   *   messages, updates the clipboard, and optionally rebroadcasts clipboard content.
-   * - On a client: decrypts messages from the host and updates the clipboard.
-   *
-   * Special case: if the message is `"request clipboard"`, the host will rebroadcast
-   * its current clipboard state to the requesting client(s).
-   *
-   * @param {any} row - A row from the `messages` table representing an encrypted message.
-   */
-  async function handleIncomingRow(row: any): Promise<void> {
+  /** Handle incoming encrypted messages. */
+  async function handleIncomingRow(row: Database['public']['Tables']['messages']['Row']): Promise<void> {
     if (row.recipient !== clientId) {
       return;
     }
 
     const binary = fromBase64(row.payload);
+    const sender = row.sender;
+    let sc = clientSessions.get(sender);
 
-    // Client sending either updated clipboard or handshake to host
-    if (isHost) {
-      const sender = row.sender;
-      let sc = clientSessions.get(sender);
+    // If no session cipher exists yet, attempt to establish or resume one
+    if (!sc) {
+      const address = new libsignal.SignalProtocolAddress(sender, 1);
+      sc = new SessionCipher(store, address);
+      clientSessions.set(sender, sc);
+    }
 
-      // If no session cipher exists yet, attempt to establish or resume one
-      if (!sc) {
-        const address = new libsignal.SignalProtocolAddress(sender, 1);
-        sc = new SessionCipher(store, address);
+    let decrypted: ArrayBuffer;
 
-        let decrypted;
-        try {
-          decrypted = await sc.decryptPreKeyWhisperMessage(binary.buffer);
-          console.log("Host: established session via pre-key with", sender);
-        } catch (e) {
-          try {
-            decrypted = await sc.decryptWhisperMessage(binary.buffer);
-            console.log("Host: resumed session with", sender);
-          } catch (err2) {
-            console.error("Host decrypt error (no session match)", err2);
-            return;
-          }
-        }
+    try {
+      decrypted = await sc.decryptPreKeyWhisperMessage(binary.buffer);
+    } catch {
+      try {
+        decrypted = await sc.decryptWhisperMessage(binary.buffer);
+      } catch (err) {
+        console.error("Decryption failed from", sender, err);
+        return;
+      }
+    }
 
-        clientSessions.set(sender, sc);
-        const msg = strFromU8(new Uint8Array(decrypted));
-        if (msg === "request clipboard") {
-          await broadcastClipboard(clipboard);
-        }
+    const msg = strFromU8(new Uint8Array(decrypted));
+
+    if (msg === "request clipboard") {
+      await sendRawToClient(clipboard, sender, sc);
+    } else {
+      // Only update if newer
+      if (!row.updated_at || (latestClipboardEventDate && new Date(row.updated_at) < latestClipboardEventDate)) {
         return;
       }
 
-      // Existing session: decrypt normally
-      try {
-        const decrypted = await sc.decryptWhisperMessage(binary.buffer);
-        const msg = strFromU8(new Uint8Array(decrypted));
-
-        if (msg === "request clipboard") {
-          await broadcastClipboard(clipboard);
-        } else {
-          clipboard = msg;
-          await broadcastClipboard(msg);
-        }
-      } catch (e) {
-        console.error('Host decrypt whisper error', e);
-      }
-    } 
-    // Host sending clipboard content to client
-    else {
-      try {
-        let decrypted;
-        try {
-          decrypted = await sessionCipher.decryptPreKeyWhisperMessage(binary);
-        } catch {
-          decrypted = await sessionCipher.decryptWhisperMessage(binary);
-        }
-        clipboard = strFromU8(new Uint8Array(decrypted));
-      } catch (e) {
-        console.error('Client decrypt error', e);
-      }
+      latestClipboardEventDate = new Date(row.updated_at);
+      clipboard = msg;
     }
   }
 
-  /**
-   * Broadcasts the current clipboard text from the host to all connected clients.
-   *
-   * This function encrypts the given plaintext with each client's established
-   * Signal session and publishes the resulting ciphertext as a message to Supabase.
-   * Only the host can invoke this; on clients it exits early.
-   *
-   * @param {string} text - The clipboard content to distribute to all connected clients.
-   */
-  async function broadcastClipboard(text: string): Promise<void> {
-    if (!isHost) {
-      return;
-    }
-
-    const pt = u8FromStr(text);
-
-    await Promise.all(clientSessions.entries().map(async clientSession => {
+  /** Broadcast plaintext to all connected clients. */
+  async function broadcastRaw(text: string): Promise<void> {
+    // Prefer spread, entries() returns iterator on safari.
+    await Promise.all([...clientSessions.entries()].map(async clientSession => {
       const [clientId, sc] = clientSession;
-      const message = await sc.encrypt(pt.buffer);
-      const payload = toBase64FromStr(message.body!);
-      await supabase.from('messages').insert({
-        room_id: roomId,
-        sender: room!.host_id,
-        recipient: clientId,
-        payload
-      });
+      await sendRawToClient(text, clientId, sc);
     }));
   }
 
+  /** Broadcast plaintext to all connected clients. */
+  async function sendRawToClient(raw: string, client: string, sc: SessionCipher) {
+    const pt = u8FromStr(raw);
+    const message = await sc.encrypt(pt.buffer);
+    const payload = toBase64FromStr(message.body!);
+
+    await supabase.from('messages').upsert({
+      room_id: roomId,
+      sender: clientId,
+      recipient: client,
+      payload
+    });
+  }
+
+  /** Track textarea input changes. */
   function handleInput(e: Event) {
     const target = e.target as HTMLTextAreaElement;
     updateClipboardInternal(target.value);
   }
 
-  /**
-   * Update clipboard after timeout, if updated within timeout period reset timeout.
-   */
+  /** Debounce clipboard updates before broadcasting. */
   function updateClipboardInternal(val: string): void {
     clearTimeout(actionTimeOut);
     actionTimeOut = setTimeout(async () => {
@@ -384,41 +352,21 @@
       clearTimeout(removeCopyMessageTimeOut);
       clipboard = val;
 
-      if (isHost) {
-        // As host, keep copy of clipboard content to persist on reload.
-        await store.put('clipboard', clipboard);
-        await broadcastClipboard(val);
-      } else {
-        const pt = u8FromStr(val);
-        const message = await sessionCipher.encrypt(pt.buffer);
-        const payload = toBase64FromStr(message.body!);
-        await supabase.from('messages').insert({
-          room_id: roomId,
-          sender: clientId,
-          recipient: room!.host_id,
-          payload
-        });
-      }
+      // As host, keep copy of clipboard content to persist on reload.
+      await store.put('clipboard', clipboard);
+      await broadcastRaw(val);
     }, 1000); 
   }
 
   async function destroy() {
-    if (confirm('Are you sure you want to destroy this room?\n\nThis will remove it for EVERYONE and cannot be undone.')) {
-      if (!browser) {
-        return;
-      }
-
-      // Ignore events from room subscription
-      roomSub?.unsubscribe();
-
-      await destroyRoom(roomId);
-
-      if (store) {
-        store.destroy();
-      }
-
-      goto('/');
+    if (!browser || !confirm('Destroy this room for all clients? This cannot be undone.')) {
+      return;
     }
+
+    roomSub?.unsubscribe();
+    await destroyRoom(roomId);
+    store?.destroy();
+    goto('/');
   }
 
   async function copyToClipboard() {
@@ -434,7 +382,9 @@
   async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) updateClipboardInternal(text);
+      if (text) {
+        updateClipboardInternal(text);
+      }
     } catch (err) {
       console.warn('Clipboard paste failed or was cancelled', err);
     }
@@ -453,7 +403,7 @@
       }
     } else {
       await navigator.clipboard.writeText(roomUrl);
-      alert('🔗 Link copied to clipboard!');
+      alert('Link copied to clipboard!');
     }
   }
 

@@ -1,14 +1,36 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+	import { supabase } from '$lib/supabase';
   let roomId = '';
 
-  function createRoom() {
-    const id = crypto.randomUUID();
-    goto(`/room/${id}`);
+  function generateRoomId(length = 10): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+    const array = new Uint8Array(length);
+    crypto.getRandomValues(array);
+    return Array.from(array, (x) => chars[x % chars.length]).join('');
   }
 
-  function joinRoom() {
-    if (roomId.trim()) goto(`/room/${roomId.trim()}`);
+  function createRoom() {
+    goto(`/room/${generateRoomId()}`);
+  }
+
+  async function joinRoom() {
+    const trimmed = roomId.trim();
+
+    // Lookup room, make sure it exists
+    const {count} = await supabase
+      .from('rooms')
+      .select('*', { count: 'exact', head: true })
+      .eq('id', trimmed)
+
+    if (!count) {
+      alert('Room not found');
+      return;
+    }
+
+    if (roomId.trim()) {
+      goto(`/room/${trimmed}`);
+    }
   }
 </script>
 
