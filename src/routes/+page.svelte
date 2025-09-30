@@ -41,6 +41,9 @@
 <p class="text-gray-600 text-center max-w-md mx-auto mb-8">
   Create a new shared clipboard and send the link or ID to your friends. 
   Anything you type or paste will instantly sync across.
+  <br><br>
+  <strong>All content is end-to-end encrypted</strong>, meaning no one but participants can read it. 
+  <a href="/e2ee-article" class="text-blue-600 hover:underline">Learn how E2EE works</a>.
 </p>
 
 <div class="flex flex-col items-center gap-4">
@@ -63,5 +66,11 @@
     >
       Join
     </button>
+  </div>
+  <!-- Footer links -->
+  <div class="mt-8 text-sm text-gray-500 text-center space-x-4">
+    <a href="/terms" class="hover:underline">Terms & Conditions</a>
+    <span>·</span>
+    <a href="/privacy" class="hover:underline">Privacy Policy</a>
   </div>
 </div>

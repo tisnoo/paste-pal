@@ -1,10 +1,10 @@
 <script lang="ts">
-  import favicon from '$lib/assets/favicon.svg';
   import '../app.css';
 </script>
 
 <svelte:head>
-  <link rel="icon" href={favicon} />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><text y=%2214%22 font-size=%2216%22>📋</text></svg>">
+  <title>Paste Pal</title>
 </svelte:head>
 
 <div class="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
@@ -17,19 +17,20 @@
 
   <!-- Footer -->
   <footer class="py-4 text-center text-sm text-gray-500">
-    <p>
-      Created with ❤️ by
+    <p class="flex flex-wrap justify-center items-center gap-2">
+      <span>Created with ❤️ by</span>
+  
       <a
-        href="https://github.com/tisnoo"
+        href="https://github.com/tisnoo/paste-pal"
         target="_blank"
         rel="noopener noreferrer"
-        class="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+        class="flex items-center gap-1 text-indigo-600 hover:underline"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
           fill="currentColor"
-          class="w-4 h-4"
+          class="w-3.5 h-3.5"
         >
           <path
             fill-rule="evenodd"
@@ -39,6 +40,9 @@
         </svg>
         tisnoo
       </a>
+  
+      <span>·</span>
+      <a href="/e2ee-article" class="hover:underline">How End-to-End Encryption Works</a>
     </p>
   </footer>
 </div>
